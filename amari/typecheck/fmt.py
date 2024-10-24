@@ -19,7 +19,7 @@ from typing import (
 
 import pydantic
 
-from .defs import Field
+from .defs import Field, ValidationError, _FieldInfo
 
 
 @dataclasses.dataclass
@@ -52,17 +52,17 @@ def identity(x: T) -> T:
     return x
 
 
-def parse_input_field(name: str, typ: Any, field: Field) -> ParsedInputField:
+def parse_input_field(name: str, typ: Any, field: _FieldInfo) -> ParsedInputField:
     if shadow_typ := _is_optional(typ):
         # exception: string? cannot be null w/o defaults
         #            because the way AML treats them are as empty strings
         #            so we can only interpret them as empty strings
         if shadow_typ is str:
-            raise ValueError(f"Field `{name}` cannot be optional without default")
+            raise ValidationError(f"Field `{name}` cannot be optional without default")
         # exception: T? cannot be required
         #            since there is no way to represent 'required null' in AML
         if field.default is ...:
-            raise ValueError(f"Field `{name}` cannot be a required optional")
+            raise ValidationError(f"Field `{name}` cannot be a required optional")
         draft = _parse_draft(name, typ.__args__[0], field)
         _old_fn_load_yaml = draft.fn_load_yaml
         _old_fn_load_cli = draft.fn_load_cli
@@ -104,7 +104,7 @@ def _is_optional(typ: Any) -> Optional[type]:
     return None
 
 
-def _parse_draft(name: str, typ: Any, field: Field) -> ParseDraft:
+def _parse_draft(name: str, typ: Any, field: _FieldInfo) -> ParseDraft:
     if typ is int:
         return ParseDraft(
             fn_load_yaml=identity,
@@ -170,9 +170,9 @@ def _parse_draft(name: str, typ: Any, field: Field) -> ParseDraft:
     errs: List[str] = []
     _validate_serialize(typ, ["root"], errs)
     if errs:
-        log = f"Failed to parse field {name}:\n"
+        log = f"Field `{name}` has invalid type:\n"
         log += "\n".join(f"  {err}" for err in errs)
-        raise TypeError(log)
+        raise ValidationError(log)
     Model = pydantic.create_model(f"parser[{name}]", value=(typ, ...))
     load_s = lambda s: Model(value=json.loads(s)).value  # type: ignore # noqa: E731
     dump_x = lambda x: json.dumps(  # noqa: E731
@@ -267,7 +267,3 @@ class TypeCheckFmtTests(unittest.TestCase):
         self.check(f_my_test, [], sample_1)
 
     pass
-
-
-if __name__ == "__main__":
-    unittest.main()
