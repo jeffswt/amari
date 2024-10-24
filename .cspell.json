@@ -1,0 +1,20 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "ignorePaths": [
+    "**/__pycache__"
+  ],
+  "allowCompoundWords": true,
+  "dictionaries": [
+    "python",
+    "filetypes",
+    "companies",
+    "softwareTerms",
+    "misc"
+  ],
+  "words": [
+    "amari",
+    "pydantic"
+  ],
+  "flagWords": []
+}
