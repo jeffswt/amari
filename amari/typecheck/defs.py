@@ -2,7 +2,8 @@
 #                 native Python annotations.
 
 import dataclasses
-from typing import Any, Optional, Union
+import enum
+from typing import Any, Generic, Literal, Optional, Type, TypeVar, Union
 
 
 class ValidationError(TypeError):
@@ -22,6 +23,7 @@ def Field(
         docs=docs,
         min=min,
         max=max,
+        datastore_mode=datastore_mode,
     )
 
 
@@ -31,4 +33,5 @@ class _FieldInfo:
     docs: Optional[str]
     min: Optional[Union[int, float]]
     max: Optional[Union[int, float]]
+    datastore_mode: Optional[str] = None
     pass

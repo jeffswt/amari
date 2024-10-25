@@ -13,7 +13,9 @@
     "misc"
   ],
   "words": [
+    "abfs",
     "amari",
+    "HDFS",
     "pydantic"
   ],
   "flagWords": []
