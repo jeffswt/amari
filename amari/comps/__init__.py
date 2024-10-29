@@ -1,4 +1,4 @@
-from typing import Callable, Generic, Optional
+from typing import Callable, Dict, Generic, Optional
 
 from typing_extensions import ParamSpec
 
@@ -14,7 +14,7 @@ class _FunctionalComponent(Generic[Args]):
         version: str,
         docs: Optional[str],
         is_deterministic: bool,
-        tag_contact: Optional[str],
+        tags: Optional[Dict[str, str]],
     ) -> None:
         """Private constructor for wrapping up wrappers."""
 
@@ -24,7 +24,7 @@ class _FunctionalComponent(Generic[Args]):
         self.version = version
         self.docs = docs
         self.is_deterministic = is_deterministic
-        self.tag_contact = tag_contact
+        self.tags = tags
 
     def __call__(self, *args: Args.args, **kwargs: Args.kwargs) -> None:
         """Invoke delegated function."""
@@ -40,7 +40,7 @@ def component(
     version: str = "0.0.1",
     docs: Optional[str] = None,
     is_deterministic: bool = True,
-    tag_contact: Optional[str] = None,
+    tags: Optional[Dict[str, str]] = None,
 ):
     def _decorate(fn: Callable[Args, None]) -> _FunctionalComponent[Args]:
         return _FunctionalComponent[Args](
@@ -50,7 +50,7 @@ def component(
             version=version,
             docs=docs,
             is_deterministic=is_deterministic,
-            tag_contact=tag_contact,
+            tags=tags,
         )
 
     return _decorate

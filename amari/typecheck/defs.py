@@ -2,7 +2,8 @@
 #                 native Python annotations.
 
 import dataclasses
-from typing import Any, Optional, Union
+import enum
+from typing import Any, Generic, Literal, Optional, TypeVar, Union
 
 
 class ValidationError(TypeError):
@@ -31,4 +32,30 @@ class _FieldInfo:
     docs: Optional[str]
     min: Optional[Union[int, float]]
     max: Optional[Union[int, float]]
+    pass
+
+
+class AzurePath:
+    _PATH_IO: Literal["input", "output"] = "input"
+    _PATH_DATASTORE_MODE: str = "hdfs"
+
+    def __init__(self, location: str):
+        self.__location = location
+
+    @property
+    def location(self) -> str:
+        return self.__location
+
+    pass
+
+
+class InputPathFromHDFS(AzurePath):
+    _PATH_IO = "input"
+    _PATH_DATASTORE_MODE = "hdfs"
+    pass
+
+
+class OutputPathOnHDFS(AzurePath):
+    _PATH_IO = "output"
+    _PATH_DATASTORE_MODE = "hdfs"
     pass

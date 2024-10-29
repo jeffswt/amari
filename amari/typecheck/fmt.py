@@ -19,7 +19,7 @@ from typing import (
 
 import pydantic
 
-from .defs import Field, ValidationError, _FieldInfo
+from .defs import AzurePath, Field, ValidationError, _FieldInfo
 
 
 @dataclasses.dataclass
@@ -42,6 +42,12 @@ class ParsedInputField:
     aml_optional: bool
     aml_default: Any
     draft: ParseDraft
+
+    def is_input_field(self) -> bool:
+        if isinstance(self.py_type, type) and issubclass(self.py_type, AzurePath):
+            return self.py_type._PATH_IO == "input"
+        return True
+
     pass
 
 
