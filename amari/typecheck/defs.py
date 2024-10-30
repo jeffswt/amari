@@ -2,8 +2,8 @@
 #                 native Python annotations.
 
 import dataclasses
-import enum
-from typing import Any, Generic, Literal, Optional, TypeVar, Union
+from types import EllipsisType
+from typing import Any, Literal, Optional, Union
 
 
 class ValidationError(TypeError):
@@ -12,7 +12,7 @@ class ValidationError(TypeError):
 
 def Field(
     # generic
-    default: Optional[Any],  # default value or `...`
+    default: Optional[Union[Any, EllipsisType]],  # default value or `...`
     docs: Optional[str] = None,
     # numbers
     min: Optional[Union[int, float]] = None,
@@ -28,7 +28,7 @@ def Field(
 
 @dataclasses.dataclass
 class _FieldInfo:
-    default: Optional[Any]
+    default: Optional[Union[Any, EllipsisType]]
     docs: Optional[str]
     min: Optional[Union[int, float]]
     max: Optional[Union[int, float]]

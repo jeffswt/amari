@@ -15,6 +15,7 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    cast,
 )
 
 import pydantic
@@ -28,6 +29,7 @@ class ParseDraft:
     fn_load_cli: Callable[[str], Any]
     fn_dump_yaml: Callable[[Any], Any]
     fn_dump_cli: Callable[[Any], str]
+    fn_post_validate: Callable[[Any], Optional[str]]
     aml_type: str
     aml_min: Union[int, float, None] = None
     aml_max: Union[int, float, None] = None
@@ -39,6 +41,7 @@ class ParsedInputField:
     name: str
     docs: Optional[str]
     py_type: Any
+    py_default: Any
     aml_optional: bool
     aml_default: Any
     draft: ParseDraft
@@ -88,6 +91,7 @@ def parse_input_field(name: str, typ: Any, field: _FieldInfo) -> ParsedInputFiel
         name=name,
         docs=field.docs,
         py_type=typ,
+        py_default=field.default,
         aml_optional=aml_optional,
         aml_default=aml_default,
         draft=draft,
@@ -117,6 +121,12 @@ def _parse_draft(name: str, typ: Any, field: _FieldInfo) -> ParseDraft:
             fn_load_cli=lambda s: int(s),
             fn_dump_yaml=identity,
             fn_dump_cli=lambda x: str(x),
+            fn_post_validate=lambda x: (
+                None
+                if (field.min is None or x >= field.min)
+                and (field.max is None or x <= field.max)
+                else f"assert {field.min} <= x <= {field.max}"
+            ),
             aml_type="integer",
             aml_min=field.min,
             aml_max=field.max,
@@ -127,6 +137,12 @@ def _parse_draft(name: str, typ: Any, field: _FieldInfo) -> ParseDraft:
             fn_load_cli=lambda s: json.loads(s),
             fn_dump_yaml=identity,
             fn_dump_cli=lambda x: json.dumps(x),
+            fn_post_validate=lambda x: (
+                None
+                if (field.min is None or x >= field.min)
+                and (field.max is None or x <= field.max)
+                else f"assert {field.min} <= x <= {field.max}"
+            ),
             aml_type="number",
             aml_min=field.min,
             aml_max=field.max,
@@ -136,7 +152,8 @@ def _parse_draft(name: str, typ: Any, field: _FieldInfo) -> ParseDraft:
             fn_load_yaml=identity,
             fn_load_cli=lambda s: {"true": True, "false": False}[s.lower()],
             fn_dump_yaml=identity,
-            fn_dump_cli=lambda x: {True: "true", False: "false"}[x],
+            fn_dump_cli=lambda x: {True: "true", False: "false"}[cast(bool, x)],
+            fn_post_validate=lambda _: None,
             aml_type="boolean",
         )
     elif typ is str:
@@ -145,30 +162,43 @@ def _parse_draft(name: str, typ: Any, field: _FieldInfo) -> ParseDraft:
             fn_load_cli=identity,
             fn_dump_yaml=identity,
             fn_dump_cli=identity,
+            fn_post_validate=lambda _: None,
             aml_type="string",
         )
     elif typ is bytes:
         return ParseDraft(
             fn_load_yaml=lambda s: base64.b64decode(s.encode()),
             fn_load_cli=lambda s: base64.b64decode(s.encode()),
-            fn_dump_yaml=lambda s: base64.b64encode(s).decode(),
-            fn_dump_cli=lambda s: base64.b64encode(s).decode(),
+            fn_dump_yaml=lambda s: base64.b64encode(cast(bytes, s)).decode(),
+            fn_dump_cli=lambda s: base64.b64encode(cast(bytes, s)).decode(),
+            fn_post_validate=lambda _: None,
             aml_type="string",
         )
     elif typ is datetime.datetime:
         return ParseDraft(
             fn_load_yaml=lambda s: datetime.datetime.fromisoformat(s),
             fn_load_cli=lambda s: datetime.datetime.fromisoformat(s),
-            fn_dump_yaml=lambda x: x.isoformat(),
-            fn_dump_cli=lambda x: x.isoformat(),
+            fn_dump_yaml=lambda x: cast(datetime.datetime, x).isoformat(),
+            fn_dump_cli=lambda x: cast(datetime.datetime, x).isoformat(),
+            fn_post_validate=lambda _: None,
             aml_type="string",
         )
     elif isinstance(typ, type) and issubclass(typ, enum.Enum):
         return ParseDraft(
             fn_load_yaml=lambda s: typ[s],
             fn_load_cli=lambda s: typ[s],
-            fn_dump_yaml=lambda x: x.name,
-            fn_dump_cli=lambda x: x.name,
+            fn_dump_yaml=lambda x: cast(enum.Enum, x).name,
+            fn_dump_cli=lambda x: cast(enum.Enum, x).name,
+            fn_post_validate=lambda _: None,
+            aml_type="string",
+        )
+    elif isinstance(typ, type) and issubclass(typ, AzurePath):
+        return ParseDraft(
+            fn_load_yaml=lambda s: typ(location=s),
+            fn_load_cli=lambda s: typ(location=s),
+            fn_dump_yaml=lambda x: cast(AzurePath, x).location,
+            fn_dump_cli=lambda x: cast(AzurePath, x).location,
+            fn_post_validate=lambda _: None,
             aml_type="string",
         )
 
@@ -191,6 +221,7 @@ def _parse_draft(name: str, typ: Any, field: _FieldInfo) -> ParseDraft:
         fn_load_cli=load_s,
         fn_dump_yaml=dump_x,
         fn_dump_cli=dump_x,
+        fn_post_validate=lambda _: None,
         aml_type="string",  # we using json
     )
 

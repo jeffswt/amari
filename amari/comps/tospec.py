@@ -1,7 +1,7 @@
 from types import EllipsisType
 from typing import Any, TypeVar, Union
 
-from ..typecheck.args import ParsedFunction, parse_function
+from ..typecheck.args import ParsedFunction
 from ..typecheck.defs import AzurePath
 from ..typecheck.fmt import ParsedInputField
 from . import _FunctionalComponent
@@ -10,7 +10,6 @@ from . import _FunctionalComponent
 def extract_component_spec(entrypoint: str, cm: _FunctionalComponent) -> dict:
     """Generate AML-style component specifications."""
 
-    parsed_fn = parse_function(cm.fn)
     component_spec = {
         "name": cm.name,
         "display_name": cm.display_name,
@@ -19,11 +18,11 @@ def extract_component_spec(entrypoint: str, cm: _FunctionalComponent) -> dict:
         "tags": un_nullish(cm.tags),
         "description": un_nullish(cm.docs),
         "is_deterministic": cm.is_deterministic,
-        "inputs": [_fmt_field(fd) for fd in parsed_fn.fields if fd.is_input_field()],
+        "inputs": [_fmt_field(fd) for fd in cm.parsed_fn.fields if fd.is_input_field()],
         "outputs": [
-            _fmt_field(fd) for fd in parsed_fn.fields if not fd.is_input_field()
+            _fmt_field(fd) for fd in cm.parsed_fn.fields if not fd.is_input_field()
         ],
-        "command": f"python {entrypoint} {_fmt_command_args(parsed_fn)}",
+        "command": f"python {entrypoint} {_fmt_command_args(cm.parsed_fn)}",
         "environment": ...,
     }
     return un_no_null(component_spec)

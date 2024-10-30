@@ -2,6 +2,8 @@ from typing import Callable, Dict, Generic, Optional
 
 from typing_extensions import ParamSpec
 
+from ..typecheck.args import parse_function
+
 Args = ParamSpec("Args")
 
 
@@ -25,6 +27,8 @@ class _FunctionalComponent(Generic[Args]):
         self.docs = docs
         self.is_deterministic = is_deterministic
         self.tags = tags
+
+        self.parsed_fn = parse_function(fn)
 
     def __call__(self, *args: Args.args, **kwargs: Args.kwargs) -> None:
         """Invoke delegated function."""
