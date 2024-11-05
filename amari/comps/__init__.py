@@ -1,4 +1,5 @@
 import copy
+import dataclasses
 import sys
 import unittest
 from typing import Any, Callable, Dict, Generic, List, Optional
@@ -6,11 +7,14 @@ from typing import Any, Callable, Dict, Generic, List, Optional
 from typing_extensions import ParamSpec
 
 from ..typecheck.args import parse_function
+from ..utils.pyctx import PyCtx
 
 Args = ParamSpec("Args")
 
 
 class _FunctionalComponent(Generic[Args]):
+    # TODO: make this abstract class so that pipelines could also share the
+    #       same call/cli/build polymorphism.
     def __init__(
         self,
         fn: Callable[Args, None],
@@ -40,26 +44,40 @@ class _FunctionalComponent(Generic[Args]):
 
     def run_py(self, *args: Args.args, **kwargs: Args.kwargs) -> None:
         """Invoke delegated function. This is equivalent to __call__ under
-        debug mode (instead of building components)."""
+        debug mode (instead of building components) or CLI mode."""
 
+        values = self.__convert_to_kwargs(*args, **kwargs)
+        return self.fn(**values)  # type: ignore
+
+    def __convert_to_kwargs(
+        self, *args: Args.args, **kwargs: Args.kwargs
+    ) -> Dict[str, Any]:
         values: Dict[str, Any] = {}
         for i, field in enumerate(self.parsed_fn.fields):
             if i < len(args):
                 value = args[i]
             elif field.name in kwargs:
                 value = kwargs[field.name]
-                values[field.name] = value
             else:
                 if field.py_default is ...:
                     raise TypeError(
                         f"{self.display_name}() missing required positional argument: '{field.name}'"
                     )
                 value = copy.deepcopy(field.py_default)
-                values[field.name] = value
             validation_err = field.draft.fn_post_validate(value)
             if validation_err:
                 raise ValueError(f"invalid value for '{field.name}': {validation_err}")
-        return self.fn(*args, **values)
+            values[field.name] = value
+        return values
+
+    def run_build(self, *args: Args.args, **kwargs: Args.kwargs) -> None:
+        """Build mode constructs AML components without actually executing them.
+        This step records the component configurations and call arguments for
+        later scheduling in the pipelines."""
+
+        values = self.__convert_to_kwargs(*args, **kwargs)
+        _ComponentSink.put(_ComponentConfig(component=self, kwargs=values))
+        return
 
     def run_cli(self, argv: Optional[List[str]] = None) -> None:
         """Delegating function to main CLI entrypoint. This is typically called
@@ -98,6 +116,43 @@ class _FunctionalComponent(Generic[Args]):
     pass
 
 
+@dataclasses.dataclass
+class _ComponentConfig:
+    # since the kwargs would be remembered & scheduled by a pipeline, here
+    # we record everything in yaml and no positional args are kept
+    component: _FunctionalComponent
+    kwargs: Dict[str, Any]
+    pass
+
+
+class _ComponentSink:
+    """Stores compiled component configs here for later use."""
+
+    _ComponentSinkCtx: PyCtx["_ComponentSink"] = PyCtx(key="amari.comps._ComponentSink")
+
+    def __init__(self):
+        self._sink: List[_ComponentConfig] = []
+
+    @staticmethod
+    def create() -> "_ComponentSink":
+        self = _ComponentSink()
+        _ComponentSink._ComponentSinkCtx.append(self, offset=1)
+        return self
+
+    @staticmethod
+    def put(config: _ComponentConfig) -> None:
+        self = _ComponentSink._ComponentSinkCtx.get()
+        if not self:
+            raise ValueError("cannot put _ComponentConfig here: not in build mode")
+        self[-1]._sink.append(config)
+        return
+
+    def dump(self) -> List[_ComponentConfig]:
+        return list(self._sink)
+
+    pass
+
+
 def component(
     name: str,
     display_name: str,
@@ -121,7 +176,7 @@ def component(
 
 
 class ComponentTest(unittest.TestCase):
-    def test_component(self):
+    def test_component_run(self):
         output: List[str] = []
 
         @component(
@@ -136,5 +191,24 @@ class ComponentTest(unittest.TestCase):
         foo.run_py(1, y_s="2")
         foo.run_cli(["--x_num", "3"])
         self.assertEqual(output, ["1 2", "3 default"])
+
+    def test_component_sink(self):
+        sink = _ComponentSink.create()
+
+        @component(
+            name="amari.comps.test.bar",
+            display_name="Bar",
+            version="0.0.1",
+            docs="""This is another test component.""",
+        )
+        def bar(x_num: int, y_s: str = "default") -> None:
+            _ = x_num, y_s
+
+        bar.run_build(1, y_s="2")
+        bar.run_build(3)
+        built = sink.dump()
+        self.assertEqual(len(built), 2)
+        self.assertEqual(built[0].kwargs, {"x_num": 1, "y_s": "2"})
+        self.assertEqual(built[1].kwargs, {"x_num": 3, "y_s": "default"})
 
     pass
