@@ -66,7 +66,7 @@ class PyCtx(Generic[T]):
     pass
 
 
-class TestPyCtx(unittest.TestCase):
+class PyCtxTests(unittest.TestCase):
     def test_working(self):
         """
         > [ a ] ---+-->   b   ------> [ c ] ------> [ d ]

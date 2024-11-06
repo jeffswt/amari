@@ -74,7 +74,3 @@ class TypeCheckArgsTest(unittest.TestCase):
             parse_function(bad_fn)
 
     pass
-
-
-if __name__ == "__main__":
-    unittest.main()
