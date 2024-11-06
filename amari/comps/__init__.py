@@ -1,20 +1,19 @@
-import copy
 import dataclasses
-import sys
 import unittest
-from typing import Any, Callable, Dict, Generic, List, Optional
-
-from typing_extensions import ParamSpec
+from typing import Any, Callable, Dict, List, Optional
 
 from ..typecheck.args import parse_function
 from ..utils.pyctx import PyCtx
+from .fnexec import (
+    fn_kwargs_from_cli,
+    fn_kwargs_from_py,
+    fn_kwargs_from_yaml,
+    fn_kwargs_into_yaml,
+)
+from .nodes import Args, CallableNode
 
-Args = ParamSpec("Args")
 
-
-class _FunctionalComponent(Generic[Args]):
-    # TODO: make this abstract class so that pipelines could also share the
-    #       same call/cli/build polymorphism.
+class _FunctionalComponent(CallableNode[Args]):
     def __init__(
         self,
         fn: Callable[Args, None],
@@ -25,8 +24,6 @@ class _FunctionalComponent(Generic[Args]):
         is_deterministic: bool,
         tags: Optional[Dict[str, str]],
     ) -> None:
-        """Private constructor for wrapping up wrappers."""
-
         self.fn = fn
         self.name = name
         self.display_name = display_name
@@ -38,116 +35,70 @@ class _FunctionalComponent(Generic[Args]):
         self.parsed_fn = parse_function(fn)
 
     def __call__(self, *args: Args.args, **kwargs: Args.kwargs) -> None:
-        """Invoke delegated function."""
-
         return self.fn(*args, **kwargs)
 
-    def run_py(self, *args: Args.args, **kwargs: Args.kwargs) -> None:
-        """Invoke delegated function. This is equivalent to __call__ under
-        debug mode (instead of building components) or CLI mode."""
-
-        values = self.__convert_to_kwargs(*args, **kwargs)
-        return self.fn(**values)  # type: ignore
-
-    def __convert_to_kwargs(
-        self, *args: Args.args, **kwargs: Args.kwargs
-    ) -> Dict[str, Any]:
-        values: Dict[str, Any] = {}
-        for i, field in enumerate(self.parsed_fn.fields):
-            if i < len(args):
-                value = args[i]
-            elif field.name in kwargs:
-                value = kwargs[field.name]
-            else:
-                if field.py_default is ...:
-                    raise TypeError(
-                        f"{self.display_name}() missing required positional argument: '{field.name}'"
-                    )
-                value = copy.deepcopy(field.py_default)
-            validation_err = field.draft.fn_post_validate(value)
-            if validation_err:
-                raise ValueError(f"invalid value for '{field.name}': {validation_err}")
-            values[field.name] = value
-        return values
-
-    def run_build(self, *args: Args.args, **kwargs: Args.kwargs) -> None:
-        """Build mode constructs AML components without actually executing them.
-        This step records the component configurations and call arguments for
-        later scheduling in the pipelines."""
-
-        values = self.__convert_to_kwargs(*args, **kwargs)
-        _ComponentSink.put(_ComponentConfig(component=self, kwargs=values))
+    def _build(self, *args: Args.args, **kwargs: Args.kwargs) -> None:
+        values = fn_kwargs_from_py(
+            name=self.name, parsed_fn=self.parsed_fn, args=args, kwargs=kwargs
+        )
+        raw_values = fn_kwargs_into_yaml(parsed_fn=self.parsed_fn, kwargs=values)
+        BuiltComponentSink.put(
+            BuiltComponentConfig(component=self, raw_kwargs=raw_values)
+        )
         return
 
-    def run_cli(self, argv: Optional[List[str]] = None) -> None:
-        """Delegating function to main CLI entrypoint. This is typically called
-        in the global scope of the script if had it been a main module. Example:
+    def _run_py(self, *args: Args.args, **kwargs: Args.kwargs) -> None:
+        values = fn_kwargs_from_py(
+            name=self.name, parsed_fn=self.parsed_fn, args=args, kwargs=kwargs
+        )
+        return self.fn(**values)  # type: ignore
 
-        ```python
-        if __name__ == "__main__":
-            foo.run_cli()
-        ```"""
+    def _run_yaml(self, kwargs: Dict[str, Any]) -> None:
+        values = fn_kwargs_from_yaml(parsed_fn=self.parsed_fn, kwargs=kwargs)
+        return self.fn(**values)  # type: ignore
 
-        if argv is None:
-            argv = sys.argv[1:]
-
-        fields = {field.name: field for field in self.parsed_fn.fields}
-        kwargs: Dict[str, Any] = {}
-        for i in range(0, len(argv), 2):
-            # obtain
-            raw_key = argv[i]
-            if not raw_key.startswith("--"):
-                raise KeyError(f"invalid option '{raw_key}'")
-            if i + 1 >= len(argv):
-                raise ValueError(f"missing value for '{raw_key}'")
-            raw_value = argv[i + 1]
-            # evaluate
-            key = raw_key[2:]
-            if key not in fields:
-                raise KeyError(f"unknown option '{raw_key}'")
-            field = fields[key]
-            value = field.draft.fn_load_cli(raw_value)
-            validation_err = field.draft.fn_post_validate(value)
-            if validation_err:
-                raise ValueError(f"invalid value for '{raw_key}': {validation_err}")
-            kwargs[key] = value
-        return self.fn(**kwargs)  # type: ignore
+    def _run_cli(self, argv: List[str]) -> None:
+        values = fn_kwargs_from_cli(self.parsed_fn, argv)
+        return self.fn(**values)  # type: ignore
 
     pass
 
 
 @dataclasses.dataclass
-class _ComponentConfig:
+class BuiltComponentConfig:
     # since the kwargs would be remembered & scheduled by a pipeline, here
     # we record everything in yaml and no positional args are kept
     component: _FunctionalComponent
-    kwargs: Dict[str, Any]
+    # this must be in yaml format to be usable by shrike
+    raw_kwargs: Dict[str, Any]
     pass
 
 
-class _ComponentSink:
+class BuiltComponentSink:
     """Stores compiled component configs here for later use."""
 
-    _ComponentSinkCtx: PyCtx["_ComponentSink"] = PyCtx(key="amari.comps._ComponentSink")
+    _ComponentSinkCtx: PyCtx["BuiltComponentSink"] = PyCtx(
+        key="amari.comps.BuiltComponentSink"
+    )
 
     def __init__(self):
-        self._sink: List[_ComponentConfig] = []
+        self._sink: List[BuiltComponentConfig] = []
 
     @staticmethod
-    def create() -> "_ComponentSink":
-        self = _ComponentSink()
-        _ComponentSink._ComponentSinkCtx.append(self, offset=1)
+    def create() -> "BuiltComponentSink":
+        self = BuiltComponentSink()
+        BuiltComponentSink._ComponentSinkCtx.append(self, offset=1)
         return self
 
     @staticmethod
-    def put(config: _ComponentConfig) -> None:
-        self = _ComponentSink._ComponentSinkCtx.get()
+    def put(config: BuiltComponentConfig) -> None:
+        self = BuiltComponentSink._ComponentSinkCtx.get()
         if not self:
-            raise ValueError("cannot put _ComponentConfig here: not in build mode")
+            raise ValueError("cannot put BuiltComponentConfig here: not in build mode")
         self[-1]._sink.append(config)
         return
 
-    def dump(self) -> List[_ComponentConfig]:
+    def dump(self) -> List[BuiltComponentConfig]:
         return list(self._sink)
 
     pass
@@ -185,15 +136,17 @@ class ComponentTest(unittest.TestCase):
             version="0.0.1",
             docs="""This is a test component.""",
         )
-        def foo(x_num: int, y_s: str = "default") -> None:
+        def foo(x_num: int, y_s: List[str] = ["default"]) -> None:
             output.append(f"{x_num} {y_s}")
 
-        foo.run_py(1, y_s="2")
-        foo.run_cli(["--x_num", "3"])
-        self.assertEqual(output, ["1 2", "3 default"])
+        foo._run_py(1, y_s=["2"])
+        foo._run_py(3)
+        foo.parsed_fn.fields[1].py_default = ["DEFAULT", "MORE"]  # hack it
+        foo._run_cli(["--x_num", "4"])
+        self.assertEqual(output, ["1 ['2']", "3 ['default']", "4 ['DEFAULT', 'MORE']"])
 
     def test_component_sink(self):
-        sink = _ComponentSink.create()
+        sink = BuiltComponentSink.create()
 
         @component(
             name="amari.comps.test.bar",
@@ -201,14 +154,17 @@ class ComponentTest(unittest.TestCase):
             version="0.0.1",
             docs="""This is another test component.""",
         )
-        def bar(x_num: int, y_s: str = "default") -> None:
+        def bar(x_num: int, y_s: List[str] = ["default"]) -> None:
             _ = x_num, y_s
 
-        bar.run_build(1, y_s="2")
-        bar.run_build(3)
+        bar._build(1, y_s=["2"])
+        bar._build(3)
+        bar.parsed_fn.fields[1].py_default = ["DEFAULT"]  # hack it
+        bar._build(4)
         built = sink.dump()
-        self.assertEqual(len(built), 2)
-        self.assertEqual(built[0].kwargs, {"x_num": 1, "y_s": "2"})
-        self.assertEqual(built[1].kwargs, {"x_num": 3, "y_s": "default"})
+        self.assertEqual(len(built), 3)
+        self.assertEqual(built[0].raw_kwargs, {"x_num": 1, "y_s": '["2"]'})
+        self.assertEqual(built[1].raw_kwargs, {"x_num": 3, "y_s": '["default"]'})
+        self.assertEqual(built[2].raw_kwargs, {"x_num": 4, "y_s": '["DEFAULT"]'})
 
     pass

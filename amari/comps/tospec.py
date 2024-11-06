@@ -1,10 +1,12 @@
 from types import EllipsisType
-from typing import Any, TypeVar, Union
+from typing import TYPE_CHECKING, Any, TypeVar, Union
 
 from ..typecheck.args import ParsedFunction
 from ..typecheck.defs import AzurePath
 from ..typecheck.fmt import ParsedInputField
-from . import _FunctionalComponent
+
+if TYPE_CHECKING:
+    from . import _FunctionalComponent
 
 
 def extract_component_spec(entrypoint: str, cm: _FunctionalComponent) -> dict:
