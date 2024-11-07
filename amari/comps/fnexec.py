@@ -1,7 +1,7 @@
 import copy
 from typing import Any, Dict, List, Tuple
 
-from amari.typecheck.args import ParsedFunction
+from ..typecheck.args import ParsedFunction
 
 
 def fn_kwargs_from_py(

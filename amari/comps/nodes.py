@@ -30,6 +30,9 @@ class CallableNode(Generic[Args], Protocol):
         """Call function with AML-ish arguments. This happens only when the
         function is in a pipeline context."""
 
+        # TODO: we're not sure if this will come up in the final version or not.
+        #       at least in the current design it stays unused
+
         raise NotImplementedError()
 
     def _run_cli(self, argv: List[str]) -> None:

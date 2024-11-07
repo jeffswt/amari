@@ -1,19 +1,19 @@
 import unittest
 from typing import Any, Callable, Dict, List, Optional
 
-from ..typecheck.args import parse_function
-from ..utils.types import guard_never
-from .env import BuiltComponentConfig, BuiltComponentSink, ComponentBuildEnv
-from .fnexec import (
+from ..comps.env import BuiltComponentConfig, BuiltComponentSink, ComponentBuildEnv
+from ..comps.fnexec import (
     fn_kwargs_from_cli,
     fn_kwargs_from_py,
     fn_kwargs_from_yaml,
     fn_kwargs_into_yaml,
 )
-from .nodes import Args, CallableNode
+from ..comps.nodes import Args, CallableNode
+from ..typecheck.args import parse_function
+from ..utils.types import guard_never
 
 
-class _FunctionalComponent(CallableNode[Args]):
+class _FunctionalPipeline(CallableNode[Args]):
     def __init__(
         self,
         fn: Callable[Args, None],
@@ -21,16 +21,12 @@ class _FunctionalComponent(CallableNode[Args]):
         display_name: str,
         version: str,
         description: Optional[str],
-        is_deterministic: bool,
-        tags: Optional[Dict[str, str]],
     ) -> None:
         self.fn = fn
         self.name = name
         self.display_name = display_name
         self.version = version
         self.description = description
-        self.is_deterministic = is_deterministic
-        self.tags = tags
 
         self.parsed_fn = parse_function(fn)
 
@@ -47,9 +43,21 @@ class _FunctionalComponent(CallableNode[Args]):
         values = fn_kwargs_from_py(
             name=self.name, parsed_fn=self.parsed_fn, args=args, kwargs=kwargs
         )
+        # capture pipeline component children
+        ComponentBuildEnv.set(ComponentBuildEnv.build)
+
+        def _capture():
+            sink = BuiltComponentSink.create()
+            self.fn(**values)  # type: ignore
+            return sink.dump()
+
+        children = _capture()
+        # collect info for the pipeline
         raw_values = fn_kwargs_into_yaml(parsed_fn=self.parsed_fn, kwargs=values)
         BuiltComponentSink.put(
-            BuiltComponentConfig(component=self, raw_kwargs=raw_values, children=[])
+            BuiltComponentConfig(
+                component=self, raw_kwargs=raw_values, children=children
+            )
         )
         return
 
@@ -70,57 +78,54 @@ class _FunctionalComponent(CallableNode[Args]):
     pass
 
 
-def component(
+def pipeline(
     name: str,
     display_name: Optional[str] = None,
     version: str = "0.0.1",
     description: Optional[str] = None,
-    is_deterministic: bool = True,
-    tags: Optional[Dict[str, str]] = None,
 ):
-    def _decorate(fn: Callable[Args, None]) -> _FunctionalComponent[Args]:
-        return _FunctionalComponent[Args](
+    def _decorate(fn: Callable[Args, None]) -> _FunctionalPipeline[Args]:
+        return _FunctionalPipeline[Args](
             fn=fn,
             name=name,
             display_name=display_name or name,
             version=version,
             description=description,
-            is_deterministic=is_deterministic,
-            tags=tags,
         )
 
     return _decorate
 
 
-class ComponentTest(unittest.TestCase):
-    def test_component_run(self):
-        output: List[str] = []
+class PipelineTest(unittest.TestCase):
+    def test_pipeline_sink(self):
+        from ..comps import component
 
-        @component(name="amari.comps.test.foo")
-        def foo(x_num: int, y_s: List[str] = ["default"]) -> None:
-            output.append(f"{x_num} {y_s}")
+        @component(name="amari.pipel.test.foo")
+        def foo(x_num: int) -> None:
+            raise RuntimeError("should not be called")
 
-        foo._run_py(1, y_s=["2"])
-        foo._run_py(3)
-        foo.parsed_fn.fields[1].py_default = ["DEFAULT", "MORE"]  # hack it
-        foo._run_cli(["--x_num", "4"])
-        self.assertEqual(output, ["1 ['2']", "3 ['default']", "4 ['DEFAULT', 'MORE']"])
+        @pipeline(name="amari.pipel.test.core")
+        def ppl_core(x_num: int) -> None:
+            foo(x_num * 2)
+            foo(x_num * 3)
 
-    def test_component_sink(self):
+        @pipeline(name="amari.pipel.test.main")
+        def ppl_main(x_num: int) -> None:
+            ppl_core(x_num * 10)
+
         sink = BuiltComponentSink.create()
-
-        @component(name="amari.comps.test.bar")
-        def bar(x_num: int, y_s: List[str] = ["default"]) -> None:
-            _ = x_num, y_s
-
-        bar._build(1, y_s=["2"])
-        bar._build(3)
-        bar.parsed_fn.fields[1].py_default = ["DEFAULT"]  # hack it
-        bar._build(4)
+        ppl_main._build(4)
         built = sink.dump()
-        self.assertEqual(len(built), 3)
-        self.assertEqual(built[0].raw_kwargs, {"x_num": 1, "y_s": '["2"]'})
-        self.assertEqual(built[1].raw_kwargs, {"x_num": 3, "y_s": '["default"]'})
-        self.assertEqual(built[2].raw_kwargs, {"x_num": 4, "y_s": '["DEFAULT"]'})
+        self.assertEqual(len(built), 1)
+        self.assertEqual(built[0].component.name, "amari.pipel.test.main")
+        self.assertEqual(len(built[0].children), 1)
+        sub = built[0].children[0]
+        self.assertEqual(sub.component.name, "amari.pipel.test.core")
+        self.assertEqual(len(sub.children), 2)
+        children = sub.children
+        self.assertEqual(children[0].component.name, "amari.pipel.test.foo")
+        self.assertEqual(children[0].raw_kwargs, {"x_num": 80})
+        self.assertEqual(children[1].component.name, "amari.pipel.test.foo")
+        self.assertEqual(children[1].raw_kwargs, {"x_num": 120})
 
     pass
