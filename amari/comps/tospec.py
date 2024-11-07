@@ -18,7 +18,7 @@ def extract_component_spec(entrypoint: str, cm: _FunctionalComponent) -> dict:
         "version": cm.version,
         "type": "spark",
         "tags": un_nullish(cm.tags),
-        "description": un_nullish(cm.docs),
+        "description": un_nullish(cm.description),
         "is_deterministic": cm.is_deterministic,
         "inputs": [_fmt_field(fd) for fd in cm.parsed_fn.fields if fd.is_input_field()],
         "outputs": [

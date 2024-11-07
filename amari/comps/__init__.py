@@ -4,6 +4,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..typecheck.args import parse_function
 from ..utils.pyctx import PyCtx
+from ..utils.types import guard_never
+from .env import ComponentBuildEnv
 from .fnexec import (
     fn_kwargs_from_cli,
     fn_kwargs_from_py,
@@ -20,7 +22,7 @@ class _FunctionalComponent(CallableNode[Args]):
         name: str,
         display_name: str,
         version: str,
-        docs: Optional[str],
+        description: Optional[str],
         is_deterministic: bool,
         tags: Optional[Dict[str, str]],
     ) -> None:
@@ -28,14 +30,20 @@ class _FunctionalComponent(CallableNode[Args]):
         self.name = name
         self.display_name = display_name
         self.version = version
-        self.docs = docs
+        self.description = description
         self.is_deterministic = is_deterministic
         self.tags = tags
 
         self.parsed_fn = parse_function(fn)
 
     def __call__(self, *args: Args.args, **kwargs: Args.kwargs) -> None:
-        return self.fn(*args, **kwargs)
+        env = ComponentBuildEnv.get()
+        if env == ComponentBuildEnv.build:
+            return self._build(*args, **kwargs)
+        elif env == ComponentBuildEnv.run:
+            return self._run_py(*args, **kwargs)
+        else:
+            guard_never(env)
 
     def _build(self, *args: Args.args, **kwargs: Args.kwargs) -> None:
         values = fn_kwargs_from_py(
@@ -108,7 +116,7 @@ def component(
     name: str,
     display_name: str,
     version: str = "0.0.1",
-    docs: Optional[str] = None,
+    description: Optional[str] = None,
     is_deterministic: bool = True,
     tags: Optional[Dict[str, str]] = None,
 ):
@@ -118,7 +126,7 @@ def component(
             name=name,
             display_name=display_name,
             version=version,
-            docs=docs,
+            description=description,
             is_deterministic=is_deterministic,
             tags=tags,
         )
@@ -134,7 +142,7 @@ class ComponentTest(unittest.TestCase):
             name="amari.comps.test.foo",
             display_name="Foo",
             version="0.0.1",
-            docs="""This is a test component.""",
+            description="""This is a test component.""",
         )
         def foo(x_num: int, y_s: List[str] = ["default"]) -> None:
             output.append(f"{x_num} {y_s}")
@@ -152,7 +160,7 @@ class ComponentTest(unittest.TestCase):
             name="amari.comps.test.bar",
             display_name="Bar",
             version="0.0.1",
-            docs="""This is another test component.""",
+            description="""This is another test component.""",
         )
         def bar(x_num: int, y_s: List[str] = ["default"]) -> None:
             _ = x_num, y_s
