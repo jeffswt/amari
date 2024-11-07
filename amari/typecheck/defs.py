@@ -2,6 +2,7 @@
 #                 native Python annotations.
 
 import dataclasses
+import pathlib
 from types import EllipsisType
 from typing import Any, Literal, Optional, Union
 
@@ -36,14 +37,17 @@ class _FieldInfo:
 
 
 class AzurePath:
+    """Local path mounted from an cloud storage remotely on Azure."""
+
     _PATH_IO: Literal["input", "output"] = "input"
     _PATH_DATASTORE_MODE: str = "hdfs"
 
-    def __init__(self, location: str):
-        self.__location = location
+    def __init__(self, location: pathlib.Path):
+        self.__location = location.resolve()
+        assert self.__location.exists() and self.__location.is_dir()
 
     @property
-    def location(self) -> str:
+    def location(self) -> pathlib.Path:
         return self.__location
 
     pass

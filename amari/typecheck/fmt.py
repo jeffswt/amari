@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 import enum
 import json
+import pathlib
 import unittest
 from typing import (
     Any,
@@ -194,10 +195,10 @@ def _parse_draft(name: str, typ: Any, field: _FieldInfo) -> ParseDraft:
         )
     elif isinstance(typ, type) and issubclass(typ, AzurePath):
         return ParseDraft(
-            fn_load_yaml=lambda s: typ(location=s),
-            fn_load_cli=lambda s: typ(location=s),
-            fn_dump_yaml=lambda x: cast(AzurePath, x).location,
-            fn_dump_cli=lambda x: cast(AzurePath, x).location,
+            fn_load_yaml=lambda s: typ(location=pathlib.Path(s)),
+            fn_load_cli=lambda s: typ(location=pathlib.Path(s)),
+            fn_dump_yaml=lambda x: cast(AzurePath, x).location.as_posix(),
+            fn_dump_cli=lambda x: cast(AzurePath, x).location.as_posix(),
             fn_post_validate=lambda _: None,
             aml_type="string",
         )
