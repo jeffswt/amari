@@ -1,13 +1,40 @@
 import ast
+import pathlib
+import sys
 import unittest
-from typing import Callable, Dict, List, Literal, Optional, Tuple, TypeAlias, cast
+from typing import Callable, Dict, List, Literal, Optional, Set, Tuple, TypeAlias, cast
 
 import black
 import pydantic
 
 SymbolName: TypeAlias = str
 
+CodePath: TypeAlias = Tuple[str, ...]
+
 CodeBlock: TypeAlias = str
+
+
+def get_deep_import_paths(
+    path: CodePath,
+    get_code: Callable[[CodePath], Optional[CodeBlock]],
+) -> List[CodePath]:
+    packages = _get_packages()
+    return _get_deep_import_paths(path, get_code, lambda symbol: symbol in packages)
+
+
+def _get_packages() -> Set[str]:
+    pkgs: Set[str] = set()
+    py_root = pathlib.Path(sys.executable).parent
+    for root in [py_root / "Lib", py_root / "Lib" / "site-packages"]:
+        for p in root.iterdir():
+            if p.is_dir():
+                if p.name.isidentifier():
+                    pkgs.add(p.name)
+            elif p.is_file() and p.suffix.lower().startswith(".py"):
+                # TODO: cannot handle 
+                if p.stem.isidentifier():
+                    pkgs.add(p.stem)
+    return pkgs
 
 
 class ImportStatement(pydantic.BaseModel):
@@ -72,10 +99,10 @@ def _prettify_code(code: CodeBlock) -> CodeBlock:
 
 
 def _get_deep_import_paths(
-    path: Tuple[str, ...],
-    get_code: Callable[[Tuple[str, ...]], Optional[CodeBlock]],
+    path: CodePath,
+    get_code: Callable[[CodePath], Optional[CodeBlock]],
     is_package: Callable[[str], bool],
-) -> List[Tuple[str, ...]]:
+) -> List[CodePath]:
     """Fetches paths of all transitive imports from a Python file."""
 
     code = get_code(path)
@@ -176,5 +203,11 @@ class DeepImportParserTests(unittest.TestCase):
             "__init__",
         }
         self.assertEqual(sorted("/".join(p) for p in deep_imports), sorted(expected))
+
+    def test_packages(self):
+        pkgs = _get_packages()
+        print(pkgs)
+        self.assertIn("os", pkgs)
+        self.assertIn("typing", pkgs)
 
     pass
