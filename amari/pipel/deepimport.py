@@ -2,7 +2,7 @@ import ast
 import pathlib
 import sys
 import unittest
-from typing import Callable, Dict, List, Literal, Optional, Set, Tuple, TypeAlias, cast
+from typing import Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple, TypeAlias, cast
 
 import black
 import pydantic
@@ -27,11 +27,11 @@ def _get_packages() -> Set[str]:
     py_root = pathlib.Path(sys.executable).parent
     for root in [py_root / "Lib", py_root / "Lib" / "site-packages"]:
         for p in root.iterdir():
+            # not verified to work with symlinks or not
             if p.is_dir():
                 if p.name.isidentifier():
                     pkgs.add(p.name)
             elif p.is_file() and p.suffix.lower().startswith(".py"):
-                # TODO: cannot handle 
                 if p.stem.isidentifier():
                     pkgs.add(p.stem)
     return pkgs
@@ -110,7 +110,7 @@ def _get_deep_import_paths(
         return []
     node = ast.parse(code)
     imports: List[ImportStatement] = []
-    for stmt in node.body:
+    for stmt in _iter_ast_nodes(node):
         if isinstance(stmt, ast.Import) or isinstance(stmt, ast.ImportFrom):
             imports.append(_parse_import_statement(code, stmt))
 
@@ -133,6 +133,13 @@ def _get_deep_import_paths(
                 child + (sym[0], "__init__"), get_code, is_package
             )
     return result
+
+
+def _iter_ast_nodes(node: ast.AST) -> Iterable[ast.AST]:
+    yield node
+    for child in ast.iter_child_nodes(node):
+        yield from _iter_ast_nodes(child)
+    return
 
 
 class DeepImportParserTests(unittest.TestCase):
@@ -182,7 +189,7 @@ class DeepImportParserTests(unittest.TestCase):
 
     def test_deep_imports(self):
         paths: Dict[str, str] = {
-            "src/run": "import numpy\nfrom . import foo\nfrom ..config import ConfigType\n",
+            "src/run": "import numpy\nfrom . import foo\nfor _ in []:\n    if True:\n        from ..config import ConfigType\n",
             "src/foo": "import os\nfrom .. import main\n",
             "config/__init__": "from .types import ConfigType\n",
             "config/types": "import pydantic\n",
